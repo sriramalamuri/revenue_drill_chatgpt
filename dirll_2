@@ -1,0 +1,92 @@
+Drill 2 — Clean Revenue vs Adjustment-Heavy Revenue Run-Rate
+-----------------------------------------------------------------
+Exact task statement
+For each Entity, vertical, BU, and LOB, compare clean operating revenue with adjustment-heavy revenue by month. Then assess whether the latest month is above or below recent clean run-rate.
+Build order
+5.	Apply the fixed clean-versus-adjustment mapping.
+6.	Aggregate to revenue_month, entity, vertical, bu, lob.
+7.	Calculate clean_revenue, adjustment_revenue, total_revenue, and clean_share_pct.
+8.	Add trailing_3m_clean_avg and compare the latest clean revenue with that average.
+Validation checks
+•	clean_revenue plus adjustment_revenue must equal total_revenue.
+•	Segment totals must roll up to company totals.
+•	Trailing averages must use full closed months only.
+  
+Output column definitions
+•	clean_share_pct = clean_revenue / total_revenue.
+•	trailing_3m_clean_avg = average clean revenue across the latest 3 closed months within the same segment.
+•	run_rate_gap_pct = (clean_revenue - trailing_3m_clean_avg) / trailing_3m_clean_avg.
+--------------------------------------------------------------------
+Solution (Partial) - Have not calculated the percentage values.
+--------------------------------------------------------------------
+
+With cte_1 as(
+Select	
+	revenue_month,
+	rev_mth_dt,
+	entity,
+	Sum(clean_revenue_amount) as sales_invoice,
+	(Sum(credit_memo_amount) + Sum(debit_memo_amount)) as memo_amount,
+	(Sum(accrual_amount) + sum(adjustment_revenue_amount) + Sum(manual_amount)) as adjustment_amount,
+	(Sum(clean_revenue_amount) + Sum(credit_memo_amount) + Sum(debit_memo_amount) + 
+	Sum(accrual_amount) + Sum(adjustment_revenue_amount) + sum(manual_amount)) as total_revenue
+From platinum.segment_month_base
+Group by 
+	revenue_month,
+	rev_mth_dt,
+	entity
+Order by
+	rev_mth_dt desc
+),
+cte_2 as
+(
+Select 
+	c.rev_mth_dt,
+	c.entity,
+	p.is_trailing_3m,
+	c.sales_invoice,
+	c.memo_amount,
+	c.adjustment_amount,
+	c.total_revenue,
+	Max(c.revenue_month) over() max_mth
+From cte_1 c
+Left Join platinum.period_reference p
+On c.rev_mth_dt = p.month_start
+Where p.is_trailing_3m = 1
+Order by rev_mth_dt Desc
+),
+cte_3 as(
+Select
+	rev_mth_dt,
+	entity,
+	sales_invoice,
+	memo_amount,
+	adjustment_amount,
+	total_revenue,
+	Round((Avg(total_revenue) over(partition by entity))::numeric,2) avg_3m_revenue,
+	max_mth
+From cte_2
+--Where extract(month from rev_mth_dt) = max_mth
+Group by
+	rev_mth_dt,
+	entity,
+	sales_invoice,
+	memo_amount,
+	adjustment_amount,
+	total_revenue,
+	max_mth
+Order by rev_mth_dt desc
+)
+Select
+	rev_mth_dt,
+	entity,
+	sales_invoice,
+	memo_amount,
+	adjustment_amount,
+	total_revenue,
+	avg_3m_revenue
+From cte_3
+where 
+	extract(month from rev_mth_dt)::numeric = max_mth
+
+
