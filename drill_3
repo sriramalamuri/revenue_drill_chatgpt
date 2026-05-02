@@ -1,0 +1,94 @@
+Drill 3 — Hierarchical Variance Tree: Entity -> BU -> LOB
+Exact task statement
+Explain the latest closed month variance versus prior month using the hierarchy Entity to BU to LOB.
+Build order
+9.	Identify latest_closed_month and prior_month.
+10.	Aggregate revenue by entity, bu, lob for both months. 
+11.	Join current and prior values.
+12.	Compute variance amount, variance percent, contribution to total variance, and variance rank.
+Validation checks
+•	Sum of variance_amt across all rows must equal company month-on-month variance.
+•	Rank by absolute variance, not signed variance.
+•	Handle zero prior-month revenue consistently.
+Final output template
+entity	bu	lob	current_month_revenue	prior_month_revenue	variance_amt	variance_pct	contribution_to_total_variance_pct	variance_rank	variance_direction
+UAE	Ocean BU	Ocean	23300000	21900000	1400000	6.4%	32.6%	1	Increase
+Output column definitions
+•	variance_amt = current_month_revenue - prior_month_revenue.
+•	variance_pct = variance_amt / prior_month_revenue.
+•	contribution_to_total_variance_pct = variance_amt / total company variance.
+--=====================================================================================
+SOLUTION:
+--=====================================================================================
+  With cte_1 as(
+Select 
+	rev_mth_dt,
+	entity,
+	bu,
+	lob,
+	Sum(total_revenue) as total_revenue,
+	Max(rev_mth_dt) over() curr_mth,
+	date_trunc('month', (Max(rev_mth_dt) over() - 1)::date)::date prior_mth
+From platinum.segment_month_base
+Group by
+	rev_mth_dt,
+	entity,
+	bu,
+	lob
+Order by rev_mth_dt desc
+),
+cte_2 as(
+Select 
+	*,
+	Sum(total_revenue) curr_mth_rev,
+	entity || bu || lob as unique_key
+From cte_1
+Where
+rev_mth_dt = curr_mth
+Group by
+	rev_mth_dt,
+	entity,
+	bu,
+	lob,
+	total_revenue,
+	curr_mth,
+	prior_mth
+),
+cte_3 as
+(Select 
+	*,
+	Sum(total_revenue) prior_mth_rev,
+	entity || bu || lob as unique_key
+From cte_1
+where rev_mth_dt = prior_mth
+Group by
+	rev_mth_dt,
+	entity,
+	bu,
+	lob,
+	total_revenue,
+	curr_mth,
+	prior_mth
+)
+Select
+	c2.entity,
+	c2.bu,
+	c2.lob,
+	coalesce(c2.curr_mth_rev,0) curr_mth_rev,
+	coalesce(c3.prior_mth_rev,0) prior_mth_rev,
+	coalesce((c2.curr_mth_rev - c3.prior_mth_rev),0) as variance_amt,
+	Round((coalesce((c2.curr_mth_rev - c3.prior_mth_rev),0) / nullif(c3.prior_mth_rev,0))::numeric,2) as var_pct,
+	ROUND(
+    	(COALESCE(c2.curr_mth_rev - c3.prior_mth_rev, 0)
+        /
+        NULLIF(SUM(c2.curr_mth_rev) OVER () - SUM(c3.prior_mth_rev) OVER (),0))::numeric,2) contri_to_total_var,
+	Row_Number() over(order by abs(coalesce((c2.curr_mth_rev - c3.prior_mth_rev),0)) desc) variance_rank
+From cte_2 c2
+Left Join cte_3 c3
+On c2.unique_key = c3.unique_key
+Group by
+	c2.entity,
+	c2.bu,
+	c2.lob,
+	c2.curr_mth_rev,
+	c3.prior_mth_rev
