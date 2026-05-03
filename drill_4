@@ -1,0 +1,71 @@
+Drill 4 — Mix Shift Scorecard Across Entity / Vertical / BU / LOB
+Exact task statement
+Measure how revenue mix changes across Entity, vertical, BU, and LOB over time using monthly or quarterly periods.
+Build order
+13.	Choose a cadence: monthly or quarterly.
+14.	Aggregate revenue by period and chosen dimension.
+15.	Create a long-format output using dimension_name and member_name.
+16.	Calculate share_of_total_pct, prior_period_share_pct, share_change_bps, and revenue change metrics.
+Validation checks
+•	For each period and dimension, member shares must sum to 100 percent.
+•	Revenue change across members must tie to total period change.
+•	Do not mix monthly and quarterly outputs in the same table.
+Final output template
+period	dimension_name	member_name	revenue	share_of_total_pct	prior_period_share_pct	share_change_bps	revenue_change_amt	revenue_change_pct
+2025-Q4	LOB	Ocean	210000000	28.6%	27.1%	150	12000000	6.1%
+Output column definitions
+•	share_of_total_pct = member revenue / total period revenue.
+•	prior_period_share_pct = same share for the prior comparable period.
+•	share_change_bps = (current share - prior share) x 10000.
+
+--==================================================================================================================
+With cte_1 as(
+Select
+	bu,
+	rev_qtr_dt,
+	Max(rev_qtr_dt) over() as curr_qtr_dt,
+	date_trunc('quarter', Max(rev_qtr_dt) Over() -1 )::date as prior_qtr_dt,
+	Sum(total_revenue) over(partition by bu, rev_qtr_dt) as bu_qtr_revenue,
+	Sum(total_revenue) over(partition by rev_qtr_dt) as total_qtr_revenue,
+	Extract(Year from rev_qtr_dt)::numeric as yr,
+	Ceil((Extract(Month from rev_qtr_dt)::numeric)/3) as qtr_num,
+	Extract(Year from rev_qtr_dt) ||'-'||'Q'|| Ceil((Extract(Month from rev_qtr_dt)::numeric)/3) as qtr_name
+From platinum.segment_month_base
+Group by 
+	bu,
+	rev_qtr_dt,
+	total_revenue
+Order by rev_qtr_dt desc
+),
+cte_2 as(
+Select
+	distinct bu as bu,
+	qtr_name,
+	bu_qtr_revenue,
+	total_qtr_revenue,
+	Coalesce((bu_qtr_revenue / nullif(total_qtr_revenue,0))*100,0) as share_of_tot_pct
+From cte_1
+Where rev_qtr_dt = curr_qtr_dt
+),
+cte_3 as(
+Select
+	distinct bu as bu,
+	qtr_name,
+	bu_qtr_revenue,
+	total_qtr_revenue,
+	Coalesce((bu_qtr_revenue / nullif(total_qtr_revenue,0))*100,0) as prior_share_of_tot_pct
+From cte_1
+Where rev_qtr_dt = prior_qtr_dt
+)
+Select
+	c2.qtr_name,
+	c2.bu,
+	c2.bu_qtr_revenue,
+	coalesce(c2.bu_qtr_revenue - c3.bu_qtr_revenue,0) as revenue_change,
+	Round((coalesce(c2.bu_qtr_revenue - c3.bu_qtr_revenue,0)/nullif(c3.bu_qtr_revenue,0)*100),3) as revenue_chg_pct,
+	Round(coalesce(c2.share_of_tot_pct,0),3) curr_qtr_share,
+	Round(coalesce(c3.prior_share_of_tot_pct,0),3) prior_qtr_share,
+	Round(coalesce((c2.share_of_tot_pct - c3.prior_share_of_tot_pct),0),3) as change_in_share_bps
+From cte_2 c2
+Left Join cte_3 c3
+On c2.bu = c3.bu
