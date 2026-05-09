@@ -1,0 +1,62 @@
+Exact task statement
+Measure how dependent the business is on a small number of customers overall and by Entity.
+Build order
+21.	Choose an analysis window, ideally trailing 12 months.
+22.	Aggregate revenue by customer and rank customers by revenue descending.
+23.	Compute cumulative revenue and cumulative share.
+24.	Separately calculate top 5, top 10, top 20, and top 50 shares by Entity.
+Validation checks
+•	Final cumulative share should reach 100 percent.
+•	Top 5 share must be less than or equal to top 10 share, and so on.
+•	Customer totals must tie to company totals.
+Final output template
+customer_rank	customer_code	oracle_customer_name	customer_revenue	cumulative_revenue	cumulative_share_pct
+1	100234	Customer A	28400000	28400000	4.6%
+Output column definitions
+•	cumulative_revenue = running sum of customer_revenue by rank.
+•	cumulative_share_pct = cumulative_revenue / total company revenue.
+•	top_10_share_pct = revenue from top 10 customers divided by total revenue for the same scope.
+
+--====================================================================================================================
+With cte_1 as
+(Select 
+	t.bu,
+	t.customer_code,
+	t.oracle_customer_name,
+	t.industry,
+	t.top150_mapping,
+	t.amount,
+	t.rev_mth_dt,
+	p.is_trailing_12m	
+From platinum.txn_normalized t
+Left Join platinum.period_reference p
+on t.rev_mth_dt = p.month_start
+Order by t.rev_mth_dt Desc
+),
+cte_2 as
+(Select
+	distinct customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	sum(amount) over(partition by customer_code) as customer_ttm_revenue,
+	sum(amount) over() as ttm_revenue
+From cte_1
+Where is_trailing_12m = 1
+Group by 
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	amount
+Order by
+	sum(amount) over(partition by customer_code) Desc
+)
+Select
+	Row_Number() over(order by customer_ttm_revenue desc) as customer_rank,
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	customer_ttm_revenue,
+	ttm_revenue,
+	Round(coalesce(customer_ttm_revenue / ttm_revenue , 0)*100,2) as cumm_share_pct
+From cte_2
+	
