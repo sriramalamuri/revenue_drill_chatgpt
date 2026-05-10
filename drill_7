@@ -1,0 +1,103 @@
+Drill 7 — Strategic Customer Momentum Classification
+Exact task statement
+Classify significant customers as accelerating, stable, softening, or sharply declining using recent revenue trend.
+Build order
+25.	Calculate trailing_12m_revenue by customer.
+26.	Calculate last_3m_revenue and prior_3m_revenue.
+27.	Compute momentum amount and momentum percent.
+28.	Apply a documented momentum classification rule.
+Validation checks
+•	last_3m and prior_3m windows must not overlap.
+•	Momentum buckets must be mutually exclusive.
+•	Handle zero prior-period revenue safely.
+Final output template
+customer_code	oracle_customer_name	top_150_flag	trailing_12m_revenue	last_3m_revenue	prior_3m_revenue	momentum_amt	momentum_pct	momentum_status
+100234	Customer A	Yes	48200000	13400000	11100000	2300000	20.7%	Accelerating
+Output column definitions
+•	momentum_amt = last_3m_revenue - prior_3m_revenue.
+•	momentum_pct = momentum_amt / prior_3m_revenue.
+•	momentum_status = classification based on thresholds you define and keep consistent.
+
+--====================================================================================================
+With cte_1 as
+(Select
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	amount,
+	rev_mth_dt,
+	is_trailing_12m,
+	is_trailing_3m,
+	is_prior_3m
+From platinum.txn_normalized t
+Left Join platinum.period_reference p
+On t.rev_mth_dt = p.month_start
+Where top150_mapping = 'Yes'
+Order by t.rev_mth_dt Desc
+),
+cte_2 as
+(Select 
+	distinct customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	sum(amount) over(partition by customer_code) as customer_ttm_rev
+From cte_1
+Where is_trailing_12m = 1
+Group by
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	amount
+),
+cte_3 as
+(Select 
+	distinct customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	sum(amount) over(partition by customer_code) as customer_t3m_rev
+From cte_1
+Where is_trailing_3m = 1
+Group by
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	amount
+),
+cte_4 as
+(Select 
+	distinct customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	sum(amount) over(partition by customer_code) as customer_p3m_rev
+From cte_1
+Where is_prior_3m = 1
+Group by
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	amount
+)
+Select
+	distinct c2.customer_code,
+	c2.oracle_customer_name,
+	c2.top150_mapping,
+	c2.customer_ttm_rev,
+	c3.customer_t3m_rev,
+	c4.customer_p3m_rev,
+	Coalesce((c3.customer_t3m_rev - c4.customer_p3m_rev),0) as momentum_amt,
+	Round(((c3.customer_t3m_rev - c4.customer_p3m_rev) / nullif(c4.customer_p3m_rev,0))*100,2) as momentum_pct,
+	Case
+		When Round(((c3.customer_t3m_rev - c4.customer_p3m_rev) / nullif(c4.customer_p3m_rev,0))*100,2) >= 5
+		Then 'Accelerating'
+		When Round(((c3.customer_t3m_rev - c4.customer_p3m_rev) / nullif(c4.customer_p3m_rev,0))*100,2) < 0
+		Then 'Declining'
+		When Round(((c3.customer_t3m_rev - c4.customer_p3m_rev) / nullif(c4.customer_p3m_rev,0))*100,2) > 0 AND
+			Round(((c3.customer_t3m_rev - c4.customer_p3m_rev) / nullif(c4.customer_p3m_rev,0))*100,2) < 5
+		Then 'Steady'
+		Else 'N/A'
+	End momentum_status
+From cte_2 c2
+Left Join cte_3 c3
+On c2.customer_code = c3.customer_code
+Left Join cte_4 c4
+On c2.customer_code = c4.customer_code
