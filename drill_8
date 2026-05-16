@@ -23,12 +23,12 @@ Output column definitions
 --and belonging to the tailing 12 month group
 With cte_1 as 
 (Select
-	distinct t.customer_code,
+	t.customer_code,
 	t.oracle_customer_name,
 	t.top150_mapping,
-	t.rev_mth_dt,	
+	date_trunc('month', t.rev_mth_dt)::date as rev_mth_dt,	
 	--Combining multiple rows of invoices for each customer into a single line per month
-	Sum(t.amount) over(partition by t.customer_code order by t.rev_mth_dt desc) as customer_revenue,
+	Sum(t.amount) as customer_revenue,
 	--marking the months that fall under the trailing 12 month window
 	--this will be used to filter only the lines that belong to the trailing 12 month window
 	p.is_trailing_12m as ttm_flag
@@ -40,8 +40,8 @@ Group By
 	t.customer_code,
 	t.oracle_customer_name,
 	t.top150_mapping,
-	t.rev_mth_dt,
-	t.amount,
+	date_trunc('month', t.rev_mth_dt)::date,
+	--t.amount,
 	p.is_trailing_12m
 Order by 1, 5 desc
 ),
@@ -49,7 +49,7 @@ Order by 1, 5 desc
 cte_2 as
 (
 Select
-	distinct customer_code,
+	customer_code,
 	oracle_customer_name,
 	top150_mapping,
 	--the line below aggregates a customer's revenue into a single value which is the total TTM revenue
