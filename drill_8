@@ -19,18 +19,23 @@ Output column definitions
 •	risk_flag = final risk band derived from risk_points.
 --==========================================================================================================================
 
-With cte_1 as
+--The output of cte_1 is a list of all customers with revenue aggregated at customer level
+--and belonging to the tailing 12 month group
+With cte_1 as 
 (Select
 	distinct t.customer_code,
 	t.oracle_customer_name,
 	t.top150_mapping,
 	t.rev_mth_dt,	
+	--Combining multiple rows of invoices for each customer into a single line per month
 	Sum(t.amount) over(partition by t.customer_code order by t.rev_mth_dt desc) as customer_revenue,
+	--marking the months that fall under the trailing 12 month window
+	--this will be used to filter only the lines that belong to the trailing 12 month window
 	p.is_trailing_12m as ttm_flag
 From platinum.txn_normalized t
-Left Join platinum.period_reference p
+Left Join platinum.period_reference p --Joining with the table where the TTM flag is set up
 On t.rev_mth_dt = p.month_start
-Where p.is_trailing_12m = 1
+Where p.is_trailing_12m = 1 --this filters out all the lines that do not belong in the TTM group
 Group By
 	t.customer_code,
 	t.oracle_customer_name,
@@ -40,22 +45,32 @@ Group By
 	p.is_trailing_12m
 Order by 1, 5 desc
 ),
+--the output of cte_2 is all the rows of cte_1 with additonal colums like TTM revenue, max month, flag
 cte_2 as
 (
 Select
 	distinct customer_code,
 	oracle_customer_name,
 	top150_mapping,
+	--the line below aggregates a customer's revenue into a single value which is the total TTM revenue
+	--in the output this is seen a a value repeating in all the lines as we have not yet applied
+	--the filter to bring everything into a single row
 	Sum(customer_revenue) over(partition by customer_code) as rev_12mth,
 	rev_mth_dt,
+	--max of rev_mth_dt will return the latest month for which we have revenue data for a customer
+	--this will also repeat across rows due to no filtering at this stage
+	--sole purpose is to finally filter out all rows except the max row
 	Max(rev_mth_dt) over(partition by customer_code) as max_dt,
 	customer_revenue,
+	--creating a new column to get the prior month's revenue for comparison and determination of rev growth
 	Lead(customer_revenue) over(partition by customer_code order by rev_mth_dt desc) as prev_mth_rev,
+	--assigning flag to identify customer which have current revenue lower than immediately preceding month
 	Case
 		When customer_revenue < Lead(customer_revenue) over(partition by customer_code order by rev_mth_dt desc)
 		Then 1
 		Else 0
 	End change_flag,
+	--the next three statements are solely for calculating the volatitly score:= std_dev(revenue) / avg(revenue)
 	stddev_samp(customer_revenue) over(partition by customer_code) as std_dev_rev,
 	avg(customer_revenue) over(partition by customer_code) as avg_rev,
 	Round(stddev_pop(customer_revenue) over(partition by customer_code) / 
@@ -71,6 +86,11 @@ Group by
 cte_3 as(
 Select 
 	*,
+	--Very important logic thanks to ChatGPT. A part of the drill is to find the declining streak of every customer
+	--for this, we created a flag based on revenue comparison between customer_revenue and prev_mth_rev
+	--this part uses that flag to create what is called stop_group. The logic is that SQL has to know when to stop
+	--counting. With this we have created two flags. As long as the filter condition is satisfied for both flags, the count
+	--continues. Once it fails, count stops and the result is the number of consecutive decline months.
 	Sum(case when change_flag = 1 Then 0 Else 1 End)
 	Over(partition by customer_code order by rev_mth_dt desc
 			rows between unbounded preceding and current row) stop_group
@@ -111,3 +131,9 @@ Select
 From cte_4
 Where 
 	rev_mth_dt = max_dt
+
+
+
+
+
+
