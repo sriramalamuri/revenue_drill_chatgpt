@@ -1,0 +1,113 @@
+Drill 8 — Strategic Customer Risk Radar
+Exact task statement
+Build a risk radar for high-value customers using size, decline, credits, volatility, and decline streak.
+Build order
+29.	Start from customer_month_base.
+30.	Calculate trailing 12-month revenue, recent growth, credit ratio, and volatility score.
+31.	Derive decline_streak_months from month-on-month revenue movement.
+32.	Assign risk_points and risk_flag using fixed rules.
+Validation checks
+•	Risk points must tie exactly to your documented scoring logic.
+•	Volatility must be based on monthly revenue, not transaction-level data.
+•	Decline streak must reset when month-on-month growth turns positive.
+Final output template
+customer_code	oracle_customer_name	trailing_12m_revenue	recent_growth_pct	credit_ratio_pct	volatility_score	decline_streak_months	risk_points	risk_flag
+100234	Customer A	48200000	-11.4%	-6.2%	0.41	3	4	High
+Output column definitions
+•	volatility_score = stddev(monthly_revenue) / avg(monthly_revenue).
+•	decline_streak_months = consecutive recent months with lower revenue than the immediately prior month.
+•	risk_flag = final risk band derived from risk_points.
+--==========================================================================================================================
+
+With cte_1 as
+(Select
+	distinct t.customer_code,
+	t.oracle_customer_name,
+	t.top150_mapping,
+	t.rev_mth_dt,	
+	Sum(t.amount) over(partition by t.customer_code order by t.rev_mth_dt desc) as customer_revenue,
+	p.is_trailing_12m as ttm_flag
+From platinum.txn_normalized t
+Left Join platinum.period_reference p
+On t.rev_mth_dt = p.month_start
+Where p.is_trailing_12m = 1
+Group By
+	t.customer_code,
+	t.oracle_customer_name,
+	t.top150_mapping,
+	t.rev_mth_dt,
+	t.amount,
+	p.is_trailing_12m
+Order by 1, 5 desc
+),
+cte_2 as
+(
+Select
+	distinct customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	Sum(customer_revenue) over(partition by customer_code) as rev_12mth,
+	rev_mth_dt,
+	Max(rev_mth_dt) over(partition by customer_code) as max_dt,
+	customer_revenue,
+	Lead(customer_revenue) over(partition by customer_code order by rev_mth_dt desc) as prev_mth_rev,
+	Case
+		When customer_revenue < Lead(customer_revenue) over(partition by customer_code order by rev_mth_dt desc)
+		Then 1
+		Else 0
+	End change_flag,
+	stddev_samp(customer_revenue) over(partition by customer_code) as std_dev_rev,
+	avg(customer_revenue) over(partition by customer_code) as avg_rev,
+	Round(stddev_pop(customer_revenue) over(partition by customer_code) / 
+		nullif(avg(customer_revenue) over(partition by customer_code),0),2) as vol_score
+From cte_1
+Group by
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	customer_revenue,
+	rev_mth_dt
+),
+cte_3 as(
+Select 
+	*,
+	Sum(case when change_flag = 1 Then 0 Else 1 End)
+	Over(partition by customer_code order by rev_mth_dt desc
+			rows between unbounded preceding and current row) stop_group
+From cte_2
+),
+cte_4 as
+(Select 
+	*,
+	Count(*) over(partition by customer_code) as declining_streak
+From cte_3
+Where 
+	change_flag = 1 AND stop_group = 0
+Group by
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	customer_revenue,
+	rev_mth_dt,
+	rev_12mth,
+	max_dt,
+	prev_mth_rev,
+	change_flag,
+	std_dev_rev,
+	avg_rev,
+	vol_score,
+	stop_group
+)
+Select 
+	customer_code,
+	oracle_customer_name,
+	top150_mapping,
+	rev_12mth,
+	customer_revenue,
+	prev_mth_rev,
+	Round((((customer_revenue / nullif(prev_mth_rev,0)) - 1)::numeric)*100,2) as recent_pct_growth,
+	vol_score,
+	declining_streak
+From cte_4
+Where 
+	rev_mth_dt = max_dt
