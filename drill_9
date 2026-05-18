@@ -65,20 +65,25 @@ Select
 		Then 
 			customer_revenue
 		Else 0
-	End as reactivate_revenue
+	End as reactivate_revenue,
+	Case 
+		When
+			customer_revenue = 0 Then 1
+		Else 0
+	End as dormant_count	
 From cte_2
 )
 Select
-	rev_mth_dt,
-	Count(*) as active_customer_count,
+	rev_mth_dt,	
 	Sum(current_revenue) as current_revenue,
 	Sum(new_to_dataset_revenue) as new_to_dataset_revenue,
 	Sum(recurring_revenue) as recurring_revenue,
 	Sum(reactivate_revenue) as reactivate_revenue,
+	Count(*) as customer_count,
+	Sum(dormant_count) as dormant_count
 From cte_3
 Group by
 	rev_mth_dt
-
 
 
 
