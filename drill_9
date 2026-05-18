@@ -1,0 +1,90 @@
+Drill 9 — New-to-Dataset, Recurring, Reactivated, and Dormant Revenue Engine
+Exact task statement
+Classify customer activity each month into new-to-dataset, recurring, reactivated, and dormant states.
+Build order
+33.	Create a customer-month activity table.
+34.	Find first_seen_month and prior_active_month for each customer-month.
+35.	Assign customer_status for each active month.
+36.	Summarize revenue by status and count dormant customers separately.
+Validation checks
+•	Status buckets for active months must be mutually exclusive.
+•	New plus recurring plus reactivated revenue must equal active revenue for the month.
+•	Dormant customers should not appear in active buckets for that same month.
+Final output template
+revenue_month	active_customer_count	new_to_dataset_revenue	recurring_revenue	reactivated_revenue	dormant_customer_count
+2025-11-01	5118	8400000	129700000	5800000	216
+Output column definitions
+•	new_to_dataset_revenue = revenue from customers whose current month equals first_seen_month.
+•	recurring_revenue = revenue from customers active in both current month and immediately prior month.
+•	reactivated_revenue = revenue from customers active now, inactive last month, but active earlier.
+
+--===========================================================================================================
+With cte_1 as
+(Select
+	customer_code,
+	oracle_customer_name,
+	rev_mth_dt,
+	Sum(amount) customer_revenue	
+From platinum.txn_normalized
+Group by
+	customer_code,
+	oracle_customer_name,
+	rev_mth_dt
+),
+cte_2 as(
+Select
+	*,
+	Min(rev_mth_dt) over(partition by customer_code) as first_seen_month,
+	date_trunc('Month', rev_mth_dt -1)::date as immediate_prior_month
+From cte_1
+),
+cte_3 as
+(
+Select 
+	customer_code,
+	oracle_customer_name,
+	rev_mth_dt,
+	immediate_prior_month,
+	first_seen_month,	
+	customer_revenue as current_revenue,
+	Case
+		when rev_mth_dt = first_seen_month Then customer_revenue
+		Else 0
+	End as new_to_dataset_revenue,
+	Case
+		When 
+			(Lag(rev_mth_dt) over(partition by customer_code order by rev_mth_dt))::date = date_trunc('Month', rev_mth_dt - 1)::date 
+		Then 
+			customer_revenue
+		Else 0
+	End as recurring_revenue,
+	Case
+		When 
+			(Lag(rev_mth_dt) over(partition by customer_code order by rev_mth_dt))::date <> date_trunc('Month', rev_mth_dt - 1)::date 
+			And rev_mth_dt <> first_seen_month
+		Then 
+			customer_revenue
+		Else 0
+	End as reactivate_revenue
+From cte_2
+)
+Select
+	rev_mth_dt,
+	Count(*) as active_customer_count,
+	Sum(current_revenue) as current_revenue,
+	Sum(new_to_dataset_revenue) as new_to_dataset_revenue,
+	Sum(recurring_revenue) as recurring_revenue,
+	Sum(reactivate_revenue) as reactivate_revenue,
+From cte_3
+Group by
+	rev_mth_dt
+
+
+
+
+
+
+
+	
+
+
