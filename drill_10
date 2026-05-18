@@ -1,0 +1,108 @@
+Drill 10 — Customer Cohort Retention by First-Seen Month
+Exact task statement
+Create customer cohorts by first-seen month and track how many customers and how much revenue remain active after 3, 6, and 12 months.
+Build order
+37.	Assign cohort_month as first_seen_month.
+38.	Calculate cohort_size.
+39.	Track active customers and cohort revenue at M0, M3, M6, and M12.
+40.	Calculate customer and revenue retention percentages.
+Validation checks
+•	M0 active customers must equal cohort size.
+•	Retention percentages must not exceed 100 percent.
+•	Immature cohorts should have null M12 values rather than zero.
+Final output template
+cohort_month	cohort_size	m0_active_customers	m3_active_customers	m6_active_customers	m12_active_customers	m0_revenue	m3_revenue	m6_revenue	m12_revenue	customer_retention_pct_m12	revenue_retention_pct_m12
+2025-01-01	42	42	31	28	24	6200000	5700000	5100000	4800000	57.1%	77.4%
+Output column definitions
+•	customer_retention_pct_m12 = m12_active_customers / cohort_size.
+•	revenue_retention_pct_m12 = m12_revenue / m0_revenue.
+•	Cohort month means the first month a customer appears in the dataset.
+
+--======================================================================================================================
+With cte_1 as
+(Select
+	oracle_customer_name,
+	rev_mth_dt,
+	Sum(amount) as revenue
+From platinum.txn_normalized
+Group by
+	oracle_customer_name,
+	rev_mth_dt
+),
+cte_2 as
+(
+Select
+	*,
+	Min(rev_mth_dt) over(partition by oracle_customer_name) as m0_month,
+	date_trunc('Month', Min(rev_mth_dt) over(partition by oracle_customer_name) + 93)::date as m3_month,
+	date_trunc('Month', Min(rev_mth_dt) over(partition by oracle_customer_name) + 186)::date as m6_month,
+	date_trunc('Month', Min(rev_mth_dt) over(partition by oracle_customer_name) + 372)::date as m12_month
+From cte_1
+Group by 
+oracle_customer_name,
+rev_mth_dt,
+revenue
+),
+cte_3 as
+(Select
+	row_number() over() as cohort,
+	m0_month,
+	Count(oracle_customer_name) as cohort_size,
+	Sum(revenue) as m0_revenue
+From cte_2
+Where rev_mth_dt = m0_month
+Group by m0_month
+Order by m0_month
+),
+cte_4 as
+(Select
+	row_number() over() as cohort,
+	m0_month,
+	Count(oracle_customer_name) as cohort_size,
+	Sum(revenue) as m3_revenue
+From cte_2
+Where rev_mth_dt = m3_month
+Group by m0_month
+Order by m0_month
+),
+cte_5 as
+(Select
+	row_number() over() as cohort,
+	m0_month,
+	Count(oracle_customer_name) as cohort_size,
+	Sum(revenue) as m6_revenue
+From cte_2
+Where rev_mth_dt = m6_month
+Group by m0_month
+Order by m0_month
+),
+cte_6 as
+(Select
+	row_number() over() as cohort,
+	m0_month,
+	Count(oracle_customer_name) as cohort_size,
+	Sum(revenue) as m12_revenue
+From cte_2
+Where rev_mth_dt = m12_month
+Group by m0_month
+Order by m0_month
+)
+Select
+	c3.m0_month as m0_month,
+	c3.cohort_size as m0_cohort,
+	c4.cohort_size as m3_cohort,
+	c5.cohort_size as m6_cohort,
+	c6.cohort_size as m12_cohort,
+	c3.m0_revenue as m0_revenue,	
+	c4.m3_revenue as m3_revenue,	
+	c5.m6_revenue as m6_revenue,	
+	c6.m12_revenue as m12_revenue
+from cte_3 c3
+Left join cte_4 c4 on
+c3.m0_month = c4.m0_month
+Left join cte_5 c5 on
+c3.m0_month = c5.m0_month
+Left join cte_6 c6 on
+c3.m0_month = c6.m0_month
+
+
