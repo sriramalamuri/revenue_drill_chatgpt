@@ -104,5 +104,84 @@ Left join cte_5 c5 on
 c3.m0_month = c5.m0_month
 Left join cte_6 c6 on
 c3.m0_month = c6.m0_month
+--=================================================================================================================
+--BETTER SOLUTION
+--=================================================================================================================
 
+With cte_1 as
+(Select
+	customer_code,
+	oracle_customer_name,
+	rev_mth_dt,
+	Sum(amount) as customer_revenue
+From platinum.txn_normalized
+Group by 
+	customer_code,
+	oracle_customer_name,
+	rev_mth_dt
+),
+cte_2 as
+(Select
+	*,
+	Min(rev_mth_dt) over(partition by oracle_customer_name) as first_seen_month
+From cte_1
+),
+cte_3 as
+(Select
+	*,
+	Extract(Year from Age(rev_mth_dt, first_seen_month))*12 +
+	Extract(Month from Age(rev_mth_dt, first_seen_month)) as distance_from_first_seen
+From cte_2
+),
+cte_4 as
+(Select
+	first_seen_month,
+	distance_from_first_seen,
+	Count(Distinct oracle_customer_name) as cohort_size,
+	Sum(customer_revenue) as cohort_revenue
+From cte_3
+Group by
+	first_seen_month,
+	distance_from_first_seen
+Order by
+	first_seen_month,
+	distance_from_first_seen
+)
+Select
+	Distinct first_seen_month as cohort_month,
+	Max(case
+		when distance_from_first_seen = 0 Then cohort_size
+		else Null
+	end)	m0_cohort_size,
+	Max(case
+		when distance_from_first_seen = 3 Then cohort_size
+		else Null
+	end)	m3_cohort_size,	
+	Max(case
+		when distance_from_first_seen = 6 Then cohort_size
+		else Null
+	end)	m6_cohort_size,
+	Max(case
+		when distance_from_first_seen = 12 Then cohort_size
+		else Null
+	end)	m12_cohort_size,
+	Max(case
+		when distance_from_first_seen = 0 Then cohort_revenue
+		else Null
+	end)	m0_revenue,
+	Max(case
+		when distance_from_first_seen = 3 Then cohort_revenue
+		else Null
+	end)	m3_revenue,	
+	Max(case
+		when distance_from_first_seen = 6 Then cohort_revenue
+		else Null
+	end)	m6_revenue,
+	Max(case
+		when distance_from_first_seen = 12 Then cohort_revenue
+		else Null
+	end)	m12_revenue
+From cte_4
+Group by first_seen_month
+Order by first_seen_month
 
