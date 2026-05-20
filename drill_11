@@ -50,9 +50,11 @@ Select
 	Count(distinct bu) as bu_count_12m,
 	Count(distinct entity) as entit_count_12m,
 	Sum(customer_revenue) as ttm_revenue,
-	Round((Sum(customer_revenue) / 12),0) as avg_monthly_rev
+	Round((Sum(customer_revenue) / 12),0) as avg_monthly_rev,
+	Round(Stddev_samp(customer_revenue) / Nullif((Sum(customer_revenue) / 12),0),2)  as vol_score
 From
 	customer_data
 Group by 
-  customer_code,
-  oracle_customer_name
+customer_code,
+oracle_customer_name
+
