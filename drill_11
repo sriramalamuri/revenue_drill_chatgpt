@@ -1,0 +1,58 @@
+Drill 11 — Cross-Sell Depth and Revenue Resilience
+Exact task statement
+Test whether customers active across more BUs, LOBs, or Entities show more stable and resilient revenue.
+Build order
+41.	Use the trailing 12-month window.
+42.	Calculate BU, LOB, and Entity footprint counts per customer.
+43.	Add active month count, trailing revenue, volatility, and recent growth.
+44.	Assign cross_sell_band and resilience_flag.
+Validation checks
+•	Distinct footprint counts must use the same trailing 12-month window for all customers.
+•	active_month_count_12m must be between 1 and 12.
+•	Classification rules must be documented before use.
+Final output template
+customer_code	oracle_customer_name	active_month_count_12m	bu_count_12m	lob_count_12m	entity_count_12m	trailing_12m_revenue	avg_monthly_revenue	volatility_score	last_3m_growth_pct	cross_sell_band	resilience_flag
+100234	Customer A	12	3	4	2	48200000	4016667	0.19	8.3%	Deep	Strong
+Output column definitions
+•	cross_sell_band = segmentation based on BU/LOB/Entity breadth.
+•	resilience_flag = final stability classification using breadth, growth, and volatility.
+•	avg_monthly_revenue = trailing_12m_revenue / 12.
+
+--===================================================================================================
+With customer_data as
+(Select
+	t.rev_mth_dt,
+	t.customer_code,
+	t.oracle_customer_name,
+	t.bu,
+	t.entity,
+	sum(t.amount) as customer_revenue,
+	p.is_trailing_12m
+From platinum.txn_normalized t
+Left Join platinum.period_reference p
+On t.rev_mth_dt = p.month_start
+Where p.is_trailing_12m = 1
+Group by 
+	t.rev_mth_dt,
+	t.customer_code,
+	t.oracle_customer_name,
+	t.bu,
+	t.entity,
+	p.is_trailing_12m
+Order by
+	p.is_trailing_12m desc,
+	t.rev_mth_dt
+)
+Select
+	customer_code,
+	oracle_customer_name,
+	Count(Distinct rev_mth_dt) as active_months,
+	Count(distinct bu) as bu_count_12m,
+	Count(distinct entity) as entit_count_12m,
+	Sum(customer_revenue) as ttm_revenue,
+	Round((Sum(customer_revenue) / 12),0) as avg_monthly_rev
+From
+	customer_data
+Group by 
+  customer_code,
+  oracle_customer_name
